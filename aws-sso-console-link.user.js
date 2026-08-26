@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AWS SSO-safe console links
 // @namespace    https://github.com/timvw/aws-sso-console-link
-// @version      0.4.0
+// @version      0.4.1
 // @description  Add SSO-enabled companion links to AWS Console pages.
 // @homepageURL  https://github.com/timvw/aws-sso-console-link
 // @supportURL   https://github.com/timvw/aws-sso-console-link/issues
@@ -29,8 +29,11 @@
   const LINK_HOST_ID = "aws-sso-console-link-anchor";
   const COMPANION_HOST_ATTRIBUTE = "data-aws-sso-link-companion";
   const decoratedLinks = new WeakMap();
+  const observedDocuments = new WeakSet();
+  const observedFrames = new WeakSet();
   let copyInProgress = false;
   let identityReadPromise = null;
+  let enhancementScheduled = false;
 
   function normalizeAccountId(value) {
     if (!value) return null;
@@ -462,8 +465,10 @@
   }
 
   function isContentConsoleLink(link) {
+    const rawDestination = link.getAttribute("href");
     if (
-      !link.hasAttribute("href") ||
+      !rawDestination ||
+      rawDestination === "#" ||
       link.closest("header, nav, [role='navigation']")
     ) {
       return false;
@@ -476,8 +481,8 @@
     if (!label) return false;
 
     const destination = normalizeAwsConsoleDestination(
-      link.getAttribute("href"),
-      window.location.href,
+      rawDestination,
+      link.ownerDocument.defaultView?.location.href || window.location.href,
     );
     return Boolean(destination && destination !== window.location.href);
   }
@@ -489,7 +494,7 @@
       return;
     }
 
-    const host = document.createElement("span");
+    const host = sourceLink.ownerDocument.createElement("span");
     host.setAttribute(COMPANION_HOST_ATTRIBUTE, "");
     const shadow = host.attachShadow({ mode: "open" });
     shadow.innerHTML = `
@@ -522,7 +527,12 @@
     `;
 
     const ssoLink = shadow.querySelector("a");
-    const destinationProvider = () => sourceLink.getAttribute("href");
+    const destinationProvider = () =>
+      normalizeAwsConsoleDestination(
+        sourceLink.getAttribute("href"),
+        sourceLink.ownerDocument.defaultView?.location.href ||
+          window.location.href,
+      );
     const update = () => refreshSsoLink(ssoLink, destinationProvider);
     sourceLink.addEventListener("pointerenter", update);
     sourceLink.addEventListener("focus", update);
@@ -532,9 +542,11 @@
     decoratedLinks.set(sourceLink, host);
   }
 
-  function decorateContentLinks() {
-    const contentRoots = [...document.querySelectorAll("main, [role='main']")];
-    const roots = contentRoots.length ? contentRoots : [document.body];
+  function decorateContentLinks(targetDocument) {
+    const contentRoots = [
+      ...targetDocument.querySelectorAll("main, [role='main']"),
+    ];
+    const roots = contentRoots.length ? contentRoots : [targetDocument.body];
     const links = new Set();
     for (const root of roots) {
       for (const link of root?.querySelectorAll("a[href]") || []) {
@@ -547,24 +559,61 @@
     }
   }
 
+  function findAccessibleDocuments(rootDocument = document) {
+    const documents = [];
+    const pending = [rootDocument];
+    const seen = new Set();
+
+    while (pending.length) {
+      const targetDocument = pending.shift();
+      if (!targetDocument?.documentElement || seen.has(targetDocument)) continue;
+      seen.add(targetDocument);
+      documents.push(targetDocument);
+
+      for (const frame of targetDocument.querySelectorAll("iframe")) {
+        try {
+          if (frame.contentDocument) pending.push(frame.contentDocument);
+        } catch {
+          // Cross-origin frames are intentionally ignored.
+        }
+      }
+    }
+
+    return documents;
+  }
+
+  function scheduleEnhancement() {
+    if (enhancementScheduled) return;
+    enhancementScheduled = true;
+    window.setTimeout(() => {
+      enhancementScheduled = false;
+      enhanceConsolePage();
+    }, 100);
+  }
+
+  function observeDocument(targetDocument) {
+    if (!observedDocuments.has(targetDocument)) {
+      observedDocuments.add(targetDocument);
+      const observer = new MutationObserver(scheduleEnhancement);
+      observer.observe(targetDocument.documentElement, {
+        childList: true,
+        subtree: true,
+      });
+    }
+
+    for (const frame of targetDocument.querySelectorAll("iframe")) {
+      if (observedFrames.has(frame)) continue;
+      observedFrames.add(frame);
+      frame.addEventListener("load", scheduleEnhancement);
+    }
+  }
+
   function enhanceConsolePage() {
     createSsoLink();
-    decorateContentLinks();
-
-    let updateScheduled = false;
-    const observer = new MutationObserver(() => {
-      if (updateScheduled) return;
-      updateScheduled = true;
-      window.setTimeout(() => {
-        updateScheduled = false;
-        createSsoLink();
-        decorateContentLinks();
-      }, 100);
-    });
-    observer.observe(document.documentElement, {
-      childList: true,
-      subtree: true,
-    });
+    for (const targetDocument of findAccessibleDocuments()) {
+      observeDocument(targetDocument);
+      decorateContentLinks(targetDocument);
+    }
   }
 
   function registerActions() {
@@ -610,6 +659,7 @@
     buildSsoUrl,
     extractIdentity,
     extractPermissionSetName,
+    findAccessibleDocuments,
     normalizeAwsConsoleDestination,
     normalizePortalUrl,
     normalizeAccountId,

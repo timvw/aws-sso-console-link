@@ -6,10 +6,27 @@ const {
   buildSsoUrl,
   extractIdentity,
   extractPermissionSetName,
+  findAccessibleDocuments,
   normalizeAwsConsoleDestination,
   normalizePortalUrl,
   normalizeAccountId,
 } = require("../aws-sso-console-link.user.js");
+
+test("discovers accessible nested service documents", () => {
+  const nestedDocument = {
+    documentElement: {},
+    querySelectorAll: () => [],
+  };
+  const rootDocument = {
+    documentElement: {},
+    querySelectorAll: () => [{ contentDocument: nestedDocument }],
+  };
+
+  assert.deepEqual(findAccessibleDocuments(rootDocument), [
+    rootDocument,
+    nestedDocument,
+  ]);
+});
 
 test("resolves console page links and rejects other destinations", () => {
   const currentPage =
