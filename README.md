@@ -27,9 +27,15 @@ Install the script separately in each browser profile where it is needed.
 
 ## Use
 
-Open any AWS Console page and select **Copy SSO link** in the lower-right
-corner. The same action is available as **Copy role-safe AWS link** in the
-Violentmonkey extension menu.
+Open any AWS Console page, select the Violentmonkey toolbar icon, and choose
+**Copy SSO link for current page**. You can also press **Alt+Shift+S** while the
+AWS Console page has focus. A short confirmation appears after the URL has been
+copied.
+
+The current address is detected automatically at the moment you invoke the
+action. You never need to copy or enter the CloudWatch, Lambda, S3, or other AWS
+Console URL yourself. The generated shortcut therefore stays correct as an AWS
+single-page application changes its query string or `#` fragment.
 
 The script reads values such as:
 
@@ -72,6 +78,15 @@ It performs these steps locally in the browser:
 5. Copies the result to the clipboard.
 
 No credentials or session tokens are included in the generated URL.
+
+## Browser address bar limitation
+
+Violentmonkey scripts run inside web pages. Chrome and Edge do not allow them to
+change the browser address bar, react to hovering over it, or add an item next
+to the address bar's native **Copy** action. The Violentmonkey menu command and
+keyboard shortcut provide the closest browser-level interaction without
+installing a dedicated extension. The userscript does not add a permanent
+button or bubble to the AWS Console.
 
 ## URL examples
 
@@ -121,10 +136,10 @@ https://example.awsapps.com/start/#/console?account_id=123456789012&role_name=Re
 
 ## Configuration
 
-On first use, the script asks for an AWS access portal URL such as
-`https://example.awsapps.com/start`. Violentmonkey stores it locally for that
-browser profile. Use **Configure AWS access portal** from the Violentmonkey menu
-to change it later.
+On first use, the script asks only for an AWS access portal URL such as
+`https://example.awsapps.com/start`—not for the current Console page URL.
+Violentmonkey stores it locally for that browser profile. Use **Configure AWS
+access portal** from the Violentmonkey menu to change it later.
 
 No account IDs, organization names, access portal identifiers, or roles are
 included in the source code. The script makes no network requests of its own.

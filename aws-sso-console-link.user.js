@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AWS SSO-safe console links
 // @namespace    https://github.com/timvw/aws-sso-console-link
-// @version      0.1.0
+// @version      0.2.0
 // @description  Copy the current AWS Console URL wrapped in the active account and IAM Identity Center role.
 // @homepageURL  https://github.com/timvw/aws-sso-console-link
 // @supportURL   https://github.com/timvw/aws-sso-console-link/issues
@@ -24,7 +24,8 @@
     '[data-testid="more-menu__awsc-nav-account-menu-button"]',
   ];
   const ACCOUNT_MENU_SELECTOR = '[data-testid="account-detail-menu"]';
-  const BUTTON_HOST_ID = "aws-sso-console-link-userscript";
+  const FEEDBACK_HOST_ID = "aws-sso-console-link-feedback";
+  let copyInProgress = false;
 
   function normalizeAccountId(value) {
     if (!value) return null;
@@ -86,7 +87,7 @@
   function configurePortalUrl() {
     const current = GM_getValue(PORTAL_STORAGE_KEY, "");
     const value = window.prompt(
-      "Enter your AWS IAM Identity Center access portal URL:",
+      "One-time setup: enter your AWS IAM Identity Center access portal URL.\n\nThe current AWS Console URL is detected automatically.",
       current || "https://example.awsapps.com/start",
     );
     if (value === null) {
@@ -228,23 +229,38 @@
     return identity;
   }
 
-  function setButtonState(button, label, kind = "normal") {
-    button.textContent = label;
-    button.dataset.kind = kind;
+  function showFeedback(message, kind = "success") {
+    document.getElementById(FEEDBACK_HOST_ID)?.remove();
 
-    clearTimeout(button.resetTimer);
-    button.resetTimer = setTimeout(() => {
-      button.textContent = "Copy SSO link";
-      button.dataset.kind = "normal";
-    }, 3000);
+    const host = document.createElement("div");
+    host.id = FEEDBACK_HOST_ID;
+    const shadow = host.attachShadow({ mode: "closed" });
+    const notice = document.createElement("div");
+    notice.textContent = message;
+    notice.setAttribute("role", kind === "error" ? "alert" : "status");
+    notice.style.cssText = `
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      z-index: 2147483647;
+      max-width: 420px;
+      padding: 10px 14px;
+      border-radius: 6px;
+      box-shadow: 0 2px 8px rgb(0 0 0 / 28%);
+      background: ${kind === "error" ? "#d13212" : "#2ea043"};
+      color: white;
+      font: 600 13px/20px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    `;
+    shadow.appendChild(notice);
+    document.documentElement.appendChild(host);
+    window.setTimeout(() => host.remove(), 3000);
   }
 
-  async function copyCurrentSsoUrl(button) {
-    if (button.disabled) return;
-    button.disabled = true;
+  async function copyCurrentSsoUrl() {
+    if (copyInProgress) return;
+    copyInProgress = true;
 
     try {
-      setButtonState(button, "Reading AWS identity…");
       const portalUrl = getPortalUrl();
       const identity = await readCurrentIdentity();
       const url = buildSsoUrl({
@@ -254,79 +270,51 @@
       });
 
       GM_setClipboard(url, "text");
-      setButtonState(
-        button,
-        `Copied ${identity.accountId} / ${identity.roleName}`,
-        "success",
-      );
+      showFeedback(`SSO link copied (${identity.roleName})`);
     } catch (error) {
       console.error("AWS SSO link userscript:", error);
-      setButtonState(button, error.message || "Could not copy SSO link", "error");
+      showFeedback(error.message || "Could not copy SSO link", "error");
     } finally {
-      button.disabled = false;
+      copyInProgress = false;
     }
   }
 
-  function addCopyButton() {
-    if (document.getElementById(BUTTON_HOST_ID)) return;
-
-    const host = document.createElement("div");
-    host.id = BUTTON_HOST_ID;
-    const shadow = host.attachShadow({ mode: "open" });
-    shadow.innerHTML = `
-      <style>
-        :host {
-          position: fixed;
-          right: 18px;
-          bottom: 18px;
-          z-index: 2147483647;
-        }
-        button {
-          appearance: none;
-          background: #ec7211;
-          border: 1px solid #9d4b00;
-          border-radius: 16px;
-          box-shadow: 0 2px 8px rgb(0 0 0 / 28%);
-          color: #16191f;
-          cursor: pointer;
-          font: 600 13px/30px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-          max-width: 360px;
-          min-height: 32px;
-          padding: 0 14px;
-        }
-        button:hover { background: #f8991d; }
-        button:disabled { cursor: wait; opacity: 0.9; }
-        button[data-kind="success"] { background: #2ea043; color: white; }
-        button[data-kind="error"] { background: #d13212; color: white; }
-      </style>
-      <button type="button" title="Copy a link that signs in with this AWS account and role">Copy SSO link</button>
-    `;
-
-    const button = shadow.querySelector("button");
-    button.addEventListener("click", () => copyCurrentSsoUrl(button));
-    document.body.appendChild(host);
-
+  function registerActions() {
     if (typeof GM_registerMenuCommand === "function") {
-      GM_registerMenuCommand("Copy role-safe AWS link", () =>
-        copyCurrentSsoUrl(button),
+      GM_registerMenuCommand(
+        "Copy SSO link for current page",
+        copyCurrentSsoUrl,
       );
       GM_registerMenuCommand("Configure AWS access portal", () => {
         try {
           const portalUrl = configurePortalUrl();
-          setButtonState(
-            button,
-            `Portal: ${new URL(portalUrl).hostname}`,
-            "success",
-          );
+          showFeedback(`Portal configured: ${new URL(portalUrl).hostname}`);
         } catch (error) {
-          setButtonState(
-            button,
+          showFeedback(
             error.message || "Could not configure portal",
             "error",
           );
         }
       });
     }
+
+    document.addEventListener(
+      "keydown",
+      (event) => {
+        const isCopyShortcut =
+          event.altKey &&
+          event.shiftKey &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          event.code === "KeyS";
+        if (!isCopyShortcut || event.repeat) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+        copyCurrentSsoUrl();
+      },
+      true,
+    );
   }
 
   const api = {
@@ -342,9 +330,5 @@
     return;
   }
 
-  if (document.body) {
-    addCopyButton();
-  } else {
-    window.addEventListener("DOMContentLoaded", addCopyButton, { once: true });
-  }
+  registerActions();
 })();
