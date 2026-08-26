@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         AWS SSO-safe console links
 // @namespace    https://github.com/timvw/aws-sso-console-link
-// @version      0.2.0
-// @description  Copy the current AWS Console URL wrapped in the active account and IAM Identity Center role.
+// @version      0.3.0
+// @description  Add an SSO-enabled link for the current AWS Console page.
 // @homepageURL  https://github.com/timvw/aws-sso-console-link
 // @supportURL   https://github.com/timvw/aws-sso-console-link/issues
 // @match        https://console.aws.amazon.com/*
 // @match        https://*.console.aws.amazon.com/*
+// @match        https://*.awsapps.com/start*
 // @grant        GM_getValue
 // @grant        GM_registerMenuCommand
 // @grant        GM_setClipboard
@@ -25,6 +26,7 @@
   ];
   const ACCOUNT_MENU_SELECTOR = '[data-testid="account-detail-menu"]';
   const FEEDBACK_HOST_ID = "aws-sso-console-link-feedback";
+  const LINK_HOST_ID = "aws-sso-console-link-anchor";
   let copyInProgress = false;
 
   function normalizeAccountId(value) {
@@ -84,6 +86,14 @@
     return `${portalUrl.origin}/start`;
   }
 
+  function accessPortalUrlFromLocation(value) {
+    try {
+      return normalizePortalUrl(value);
+    } catch {
+      return null;
+    }
+  }
+
   function configurePortalUrl() {
     const current = GM_getValue(PORTAL_STORAGE_KEY, "");
     const value = window.prompt(
@@ -99,9 +109,13 @@
     return normalized;
   }
 
-  function getPortalUrl() {
+  function getConfiguredPortalUrl() {
     const configured = GM_getValue(PORTAL_STORAGE_KEY, "");
-    return configured ? normalizePortalUrl(configured) : configurePortalUrl();
+    return configured ? normalizePortalUrl(configured) : null;
+  }
+
+  function getPortalUrl() {
+    return getConfiguredPortalUrl() || configurePortalUrl();
   }
 
   function buildSsoUrl({ portalUrl, accountId, roleName, destination }) {
@@ -158,6 +172,17 @@
     return texts;
   }
 
+  function readAvailableIdentity() {
+    const accountControl = findAccountControl();
+    const accountMenu = document.querySelector(ACCOUNT_MENU_SELECTOR);
+    return {
+      accountControl,
+      identity: extractIdentity(
+        collectIdentityTexts(accountControl, accountMenu),
+      ),
+    };
+  }
+
   function waitForVisibleElement(selector, timeoutMs = 2500) {
     return new Promise((resolve, reject) => {
       const existing = document.querySelector(selector);
@@ -189,15 +214,14 @@
   }
 
   async function readCurrentIdentity() {
-    const accountControl = findAccountControl();
+    const available = readAvailableIdentity();
+    const accountControl = available.accountControl;
     if (!accountControl) {
       throw new Error("Could not find the AWS account control.");
     }
 
     let accountMenu = document.querySelector(ACCOUNT_MENU_SELECTOR);
-    let identity = extractIdentity(
-      collectIdentityTexts(accountControl, accountMenu),
-    );
+    let identity = available.identity;
     let openedMenu = false;
 
     if (!identity.accountId || !identity.roleName) {
@@ -279,6 +303,133 @@
     }
   }
 
+  function setSsoLinkReady(link, url, identity, destination) {
+    link.href = url;
+    link.dataset.destination = destination;
+    link.dataset.state = "ready";
+    link.title = `Open or copy this page through ${identity.roleName}`;
+  }
+
+  async function refreshSsoLink(link, configureIfMissing = false) {
+    const destination = window.location.href;
+
+    try {
+      const portalUrl = configureIfMissing
+        ? getPortalUrl()
+        : getConfiguredPortalUrl();
+      if (!portalUrl) {
+        link.removeAttribute("href");
+        link.dataset.state = "unconfigured";
+        link.title =
+          "Visit your AWS access portal once, or configure it from the Violentmonkey menu";
+        return null;
+      }
+
+      const available = readAvailableIdentity();
+      let identity = available.identity;
+
+      if (identity.accountId && identity.roleName) {
+        const url = buildSsoUrl({ portalUrl, ...identity, destination });
+        setSsoLinkReady(link, url, identity, destination);
+        return url;
+      }
+
+      link.dataset.state = "loading";
+      link.title = "Preparing SSO link…";
+      identity = await readCurrentIdentity();
+      const url = buildSsoUrl({ portalUrl, ...identity, destination });
+      setSsoLinkReady(link, url, identity, destination);
+      return url;
+    } catch (error) {
+      console.error("AWS SSO link userscript:", error);
+      link.removeAttribute("href");
+      link.dataset.state = "error";
+      link.title = error.message || "Could not prepare SSO link";
+      return null;
+    }
+  }
+
+  function createSsoLink() {
+    if (document.getElementById(LINK_HOST_ID)) return true;
+
+    const accountControl = findAccountControl();
+    const insertionPoint =
+      accountControl?.closest("button") || accountControl;
+    if (!insertionPoint?.parentElement) return false;
+
+    const host = document.createElement("span");
+    host.id = LINK_HOST_ID;
+    const shadow = host.attachShadow({ mode: "open" });
+    shadow.innerHTML = `
+      <style>
+        :host {
+          align-self: stretch;
+          display: inline-flex;
+        }
+        a {
+          align-items: center;
+          border-inline-end: 1px solid rgb(255 255 255 / 24%);
+          color: #fff;
+          display: inline-flex;
+          font: 600 13px/20px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          padding: 0 12px;
+          text-decoration: none;
+          white-space: nowrap;
+        }
+        a:hover, a:focus-visible {
+          background: rgb(255 255 255 / 12%);
+          text-decoration: underline;
+        }
+        a[data-state="loading"], a[data-state="unconfigured"] {
+          color: #d5dbdb;
+        }
+        a[data-state="error"] {
+          color: #ffb3a7;
+        }
+      </style>
+      <a data-state="loading" target="_blank" rel="noopener noreferrer">SSO link</a>
+    `;
+
+    const link = shadow.querySelector("a");
+    const update = () => refreshSsoLink(link);
+    link.addEventListener("pointerenter", update);
+    link.addEventListener("focus", update);
+    link.addEventListener("pointerdown", update);
+    link.addEventListener("contextmenu", update);
+    link.addEventListener("click", (event) => {
+      const destinationIsCurrent =
+        link.dataset.destination === window.location.href;
+      refreshSsoLink(link, true).then((url) => {
+        if (!destinationIsCurrent && url) {
+          showFeedback("SSO link is ready—click it again to open it");
+        }
+      });
+      if (!destinationIsCurrent) event.preventDefault();
+    });
+
+    insertionPoint.parentElement.insertBefore(host, insertionPoint);
+    refreshSsoLink(link);
+    return true;
+  }
+
+  function keepSsoLinkMounted() {
+    createSsoLink();
+
+    let updateScheduled = false;
+    const observer = new MutationObserver(() => {
+      if (document.getElementById(LINK_HOST_ID) || updateScheduled) return;
+      updateScheduled = true;
+      window.setTimeout(() => {
+        updateScheduled = false;
+        createSsoLink();
+      }, 100);
+    });
+    observer.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+    });
+  }
+
   function registerActions() {
     if (typeof GM_registerMenuCommand === "function") {
       GM_registerMenuCommand(
@@ -318,6 +469,7 @@
   }
 
   const api = {
+    accessPortalUrlFromLocation,
     buildSsoUrl,
     extractIdentity,
     extractPermissionSetName,
@@ -330,5 +482,12 @@
     return;
   }
 
+  const accessPortalUrl = accessPortalUrlFromLocation(window.location.href);
+  if (accessPortalUrl) {
+    GM_setValue(PORTAL_STORAGE_KEY, accessPortalUrl);
+    return;
+  }
+
   registerActions();
+  keepSsoLinkMounted();
 })();
