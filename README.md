@@ -1,7 +1,7 @@
 # AWS SSO Console Link
 
-A Violentmonkey userscript for Chrome and Microsoft Edge that copies the
-current AWS Console URL as an IAM Identity Center shortcut.
+A Violentmonkey userscript for Chrome and Microsoft Edge that adds an
+SSO-enabled link for the current AWS Console page.
 
 The generated link sends its recipient through the configured AWS access
 portal, selects the account and permission set visible in the AWS Console, and
@@ -27,10 +27,16 @@ Install the script separately in each browser profile where it is needed.
 
 ## Use
 
-Open any AWS Console page, select the Violentmonkey toolbar icon, and choose
-**Copy SSO link for current page**. You can also press **Alt+Shift+S** while the
-AWS Console page has focus. A short confirmation appears after the URL has been
-copied.
+Open any AWS Console page and find **SSO link** beside the account selector in
+the top navigation bar:
+
+- Hover over it to prepare the SSO-enabled URL for the current page.
+- Right-click it and use the browser's native **Copy link** action.
+- Select it normally to open the SSO-enabled URL in a new tab.
+
+You can also select **Copy SSO link for current page** from the Violentmonkey
+toolbar menu or press **Alt+Shift+S**. A short confirmation appears after the
+URL has been copied.
 
 The current address is detected automatically at the moment you invoke the
 action. You never need to copy or enter the CloudWatch, Lambda, S3, or other AWS
@@ -82,11 +88,10 @@ No credentials or session tokens are included in the generated URL.
 ## Browser address bar limitation
 
 Violentmonkey scripts run inside web pages. Chrome and Edge do not allow them to
-change the browser address bar, react to hovering over it, or add an item next
-to the address bar's native **Copy** action. The Violentmonkey menu command and
-keyboard shortcut provide the closest browser-level interaction without
-installing a dedicated extension. The userscript does not add a permanent
-button or bubble to the AWS Console.
+change the browser address bar or add an item next to the address bar's native
+**Copy** action. The script therefore inserts a real hyperlink in the AWS top
+navigation bar. Because it is an ordinary link, its destination appears on
+hover and the browser's native **Copy link** action works on it.
 
 ## URL examples
 
@@ -136,10 +141,13 @@ https://example.awsapps.com/start/#/console?account_id=123456789012&role_name=Re
 
 ## Configuration
 
-On first use, the script asks only for an AWS access portal URL such as
-`https://example.awsapps.com/start`—not for the current Console page URL.
-Violentmonkey stores it locally for that browser profile. Use **Configure AWS
-access portal** from the Violentmonkey menu to change it later.
+The script remembers the portal URL automatically whenever you visit an AWS
+access portal page such as `https://example.awsapps.com/start`. Visit the portal
+once in each browser profile, then reload the AWS Console page.
+
+If the portal has not been detected, selecting the in-page link prompts only
+for that access portal URL—not for the current Console page URL. You can also
+use **Configure AWS access portal** from the Violentmonkey menu.
 
 No account IDs, organization names, access portal identifiers, or roles are
 included in the source code. The script makes no network requests of its own.

@@ -2,12 +2,26 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  accessPortalUrlFromLocation,
   buildSsoUrl,
   extractIdentity,
   extractPermissionSetName,
   normalizePortalUrl,
   normalizeAccountId,
 } = require("../aws-sso-console-link.user.js");
+
+test("recognizes and normalizes an AWS access portal page", () => {
+  assert.equal(
+    accessPortalUrlFromLocation(
+      "https://example.awsapps.com/start/#/?tab=accounts",
+    ),
+    "https://example.awsapps.com/start",
+  );
+  assert.equal(
+    accessPortalUrlFromLocation("https://console.aws.amazon.com/console/home"),
+    null,
+  );
+});
 
 test("extracts the current AWS account ID", () => {
   assert.equal(normalizeAccountId("Account ID 1234-5678-9012"), "123456789012");
