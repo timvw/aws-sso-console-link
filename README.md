@@ -39,9 +39,9 @@ link to inspect its destination, right-click it and select the browser's native
 **Copy link** action, or select it normally to open it through IAM Identity
 Center in a new tab.
 
-This works for links added dynamically by AWS, including CloudWatch log groups
-and streams. It also applies to console resource links in services such as S3,
-Lambda, and ECS.
+This works for links added dynamically by AWS and for services rendered inside
+same-origin AWS console frames, including CloudWatch log groups and streams. It
+also applies to console resource links in services such as S3, Lambda, and ECS.
 
 For the current page itself, use **SSO link** beside the account selector in the
 top navigation bar:
