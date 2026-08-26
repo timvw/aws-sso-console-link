@@ -11,7 +11,10 @@ S3 buckets, and ECS resources.
 
 ## Install
 
-1. Install Violentmonkey in Chrome or Microsoft Edge.
+1. Install Violentmonkey:
+   - [Google Chrome — Chrome Web Store](https://chromewebstore.google.com/detail/violentmonkey/jinjaccalgkegednnccohejagnlnfdag)
+   - [Microsoft Edge — Chrome Web Store](https://chromewebstore.google.com/detail/violentmonkey/jinjaccalgkegednnccohejagnlnfdag)
+     (enable **Allow extensions from other stores** in `edge://extensions`)
 2. Open [`aws-sso-console-link.user.js`](aws-sso-console-link.user.js).
 3. Select **Raw**. Violentmonkey should open its installation page.
 4. Confirm the installation and reload an AWS Console tab.
