@@ -1,7 +1,7 @@
 # AWS SSO Console Link
 
-A Violentmonkey userscript for Chrome and Microsoft Edge that adds an
-SSO-enabled link for the current AWS Console page.
+A Violentmonkey userscript for Chrome and Microsoft Edge that adds SSO-enabled
+companion links to AWS Console pages.
 
 The generated link sends its recipient through the configured AWS access
 portal, selects the account and permission set visible in the AWS Console, and
@@ -27,8 +27,24 @@ Install the script separately in each browser profile where it is needed.
 
 ## Use
 
-Open any AWS Console page and find **SSO link** beside the account selector in
-the top navigation bar:
+The script leaves existing AWS links unchanged and adds a small **SSO** link
+beside eligible links in the page content. For example:
+
+```text
+/aws/lambda/example-function  SSO
+```
+
+Use the original link for normal navigation. Hover over the adjacent **SSO**
+link to inspect its destination, right-click it and select the browser's native
+**Copy link** action, or select it normally to open it through IAM Identity
+Center in a new tab.
+
+This works for links added dynamically by AWS, including CloudWatch log groups
+and streams. It also applies to console resource links in services such as S3,
+Lambda, and ECS.
+
+For the current page itself, use **SSO link** beside the account selector in the
+top navigation bar:
 
 - Hover over it to prepare the SSO-enabled URL for the current page.
 - Right-click it and use the browser's native **Copy link** action.
@@ -38,10 +54,9 @@ You can also select **Copy SSO link for current page** from the Violentmonkey
 toolbar menu or press **Alt+Shift+S**. A short confirmation appears after the
 URL has been copied.
 
-The current address is detected automatically at the moment you invoke the
-action. You never need to copy or enter the CloudWatch, Lambda, S3, or other AWS
-Console URL yourself. The generated shortcut therefore stays correct as an AWS
-single-page application changes its query string or `#` fragment.
+Destinations are detected automatically. You never need to copy or enter a
+CloudWatch, Lambda, S3, or other AWS Console URL yourself. Generated shortcuts
+preserve query strings and `#` fragments.
 
 The script reads values such as:
 
@@ -89,9 +104,9 @@ No credentials or session tokens are included in the generated URL.
 
 Violentmonkey scripts run inside web pages. Chrome and Edge do not allow them to
 change the browser address bar or add an item next to the address bar's native
-**Copy** action. The script therefore inserts a real hyperlink in the AWS top
-navigation bar. Because it is an ordinary link, its destination appears on
-hover and the browser's native **Copy link** action works on it.
+**Copy** action. The script therefore inserts real hyperlinks in the AWS page
+content and top navigation bar. Their destinations appear on hover and the
+browser's native **Copy link** action works on them.
 
 ## URL examples
 

@@ -6,9 +6,27 @@ const {
   buildSsoUrl,
   extractIdentity,
   extractPermissionSetName,
+  normalizeAwsConsoleDestination,
   normalizePortalUrl,
   normalizeAccountId,
 } = require("../aws-sso-console-link.user.js");
+
+test("resolves console page links and rejects other destinations", () => {
+  const currentPage =
+    "https://eu-central-1.console.aws.amazon.com/cloudwatch/home?region=eu-central-1#logsV2:log-groups";
+
+  assert.equal(
+    normalizeAwsConsoleDestination(
+      "#logsV2:log-groups/log-group/$252Faws$252Flambda$252Fexample",
+      currentPage,
+    ),
+    "https://eu-central-1.console.aws.amazon.com/cloudwatch/home?region=eu-central-1#logsV2:log-groups/log-group/$252Faws$252Flambda$252Fexample",
+  );
+  assert.equal(
+    normalizeAwsConsoleDestination("https://example.com/resource", currentPage),
+    null,
+  );
+});
 
 test("recognizes and normalizes an AWS access portal page", () => {
   assert.equal(

@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         AWS SSO-safe console links
 // @namespace    https://github.com/timvw/aws-sso-console-link
-// @version      0.3.0
-// @description  Add an SSO-enabled link for the current AWS Console page.
+// @version      0.4.0
+// @description  Add SSO-enabled companion links to AWS Console pages.
 // @homepageURL  https://github.com/timvw/aws-sso-console-link
 // @supportURL   https://github.com/timvw/aws-sso-console-link/issues
 // @match        https://console.aws.amazon.com/*
@@ -27,7 +27,10 @@
   const ACCOUNT_MENU_SELECTOR = '[data-testid="account-detail-menu"]';
   const FEEDBACK_HOST_ID = "aws-sso-console-link-feedback";
   const LINK_HOST_ID = "aws-sso-console-link-anchor";
+  const COMPANION_HOST_ATTRIBUTE = "data-aws-sso-link-companion";
+  const decoratedLinks = new WeakMap();
   let copyInProgress = false;
+  let identityReadPromise = null;
 
   function normalizeAccountId(value) {
     if (!value) return null;
@@ -118,6 +121,21 @@
     return getConfiguredPortalUrl() || configurePortalUrl();
   }
 
+  function normalizeAwsConsoleDestination(value, baseUrl) {
+    try {
+      const destinationUrl = baseUrl
+        ? new URL(value, baseUrl)
+        : new URL(value);
+      const isAwsConsole =
+        destinationUrl.protocol === "https:" &&
+        (destinationUrl.hostname === "console.aws.amazon.com" ||
+          destinationUrl.hostname.endsWith(".console.aws.amazon.com"));
+      return isAwsConsole ? destinationUrl.href : null;
+    } catch {
+      return null;
+    }
+  }
+
   function buildSsoUrl({ portalUrl, accountId, roleName, destination }) {
     if (!/^\d{12}$/.test(accountId || "")) {
       throw new Error("Could not determine the 12-digit AWS account ID.");
@@ -126,19 +144,15 @@
       throw new Error("Could not determine the IAM Identity Center role.");
     }
 
-    const destinationUrl = new URL(destination);
-    const isAwsConsole =
-      destinationUrl.protocol === "https:" &&
-      (destinationUrl.hostname === "console.aws.amazon.com" ||
-        destinationUrl.hostname.endsWith(".console.aws.amazon.com"));
-    if (!isAwsConsole) {
+    const destinationUrl = normalizeAwsConsoleDestination(destination);
+    if (!destinationUrl) {
       throw new Error("The current page is not an AWS Console URL.");
     }
 
     const params = new URLSearchParams({
       account_id: accountId,
       role_name: roleName,
-      destination: destinationUrl.href,
+      destination: destinationUrl,
     });
 
     return `${normalizePortalUrl(portalUrl)}/#/console?${params}`;
@@ -213,7 +227,7 @@
     });
   }
 
-  async function readCurrentIdentity() {
+  async function readCurrentIdentityFromPage() {
     const available = readAvailableIdentity();
     const accountControl = available.accountControl;
     if (!accountControl) {
@@ -251,6 +265,20 @@
     }
 
     return identity;
+  }
+
+  function readCurrentIdentity() {
+    const available = readAvailableIdentity().identity;
+    if (available.accountId && available.roleName) {
+      return Promise.resolve(available);
+    }
+
+    if (!identityReadPromise) {
+      identityReadPromise = readCurrentIdentityFromPage().finally(() => {
+        identityReadPromise = null;
+      });
+    }
+    return identityReadPromise;
   }
 
   function showFeedback(message, kind = "success") {
@@ -307,13 +335,23 @@
     link.href = url;
     link.dataset.destination = destination;
     link.dataset.state = "ready";
-    link.title = `Open or copy this page through ${identity.roleName}`;
+    link.title = `Open or copy this AWS link through ${identity.roleName}`;
   }
 
-  async function refreshSsoLink(link, configureIfMissing = false) {
-    const destination = window.location.href;
+  async function refreshSsoLink(
+    link,
+    destinationProvider,
+    configureIfMissing = false,
+  ) {
+    const destination = normalizeAwsConsoleDestination(
+      destinationProvider(),
+      window.location.href,
+    );
 
     try {
+      if (!destination) {
+        throw new Error("This is not an AWS Console link.");
+      }
       const portalUrl = configureIfMissing
         ? getPortalUrl()
         : getConfiguredPortalUrl();
@@ -347,6 +385,32 @@
       link.title = error.message || "Could not prepare SSO link";
       return null;
     }
+  }
+
+  function wireSsoLink(link, destinationProvider) {
+    const update = () => refreshSsoLink(link, destinationProvider);
+    link.addEventListener("pointerenter", update);
+    link.addEventListener("focus", update);
+    link.addEventListener("pointerdown", update);
+    link.addEventListener("contextmenu", update);
+    link.addEventListener("click", (event) => {
+      const expectedDestination = normalizeAwsConsoleDestination(
+        destinationProvider(),
+        window.location.href,
+      );
+      const refresh = refreshSsoLink(link, destinationProvider, true);
+      const isReady =
+        link.hasAttribute("href") &&
+        link.dataset.destination === expectedDestination;
+      if (isReady) return;
+
+      event.preventDefault();
+      refresh.then((url) => {
+        if (url) showFeedback("SSO link is ready—click it again to open it");
+      });
+    });
+
+    update();
   }
 
   function createSsoLink() {
@@ -391,37 +455,110 @@
     `;
 
     const link = shadow.querySelector("a");
-    const update = () => refreshSsoLink(link);
-    link.addEventListener("pointerenter", update);
-    link.addEventListener("focus", update);
-    link.addEventListener("pointerdown", update);
-    link.addEventListener("contextmenu", update);
-    link.addEventListener("click", (event) => {
-      const destinationIsCurrent =
-        link.dataset.destination === window.location.href;
-      refreshSsoLink(link, true).then((url) => {
-        if (!destinationIsCurrent && url) {
-          showFeedback("SSO link is ready—click it again to open it");
-        }
-      });
-      if (!destinationIsCurrent) event.preventDefault();
-    });
+    wireSsoLink(link, () => window.location.href);
 
     insertionPoint.parentElement.insertBefore(host, insertionPoint);
-    refreshSsoLink(link);
     return true;
   }
 
-  function keepSsoLinkMounted() {
+  function isContentConsoleLink(link) {
+    if (
+      !link.hasAttribute("href") ||
+      link.closest("header, nav, [role='navigation']")
+    ) {
+      return false;
+    }
+
+    const label =
+      link.textContent?.trim() ||
+      link.getAttribute("aria-label") ||
+      link.getAttribute("title");
+    if (!label) return false;
+
+    const destination = normalizeAwsConsoleDestination(
+      link.getAttribute("href"),
+      window.location.href,
+    );
+    return Boolean(destination && destination !== window.location.href);
+  }
+
+  function createCompanionLink(sourceLink) {
+    const existing = decoratedLinks.get(sourceLink);
+    if (existing) {
+      if (!existing.isConnected) sourceLink.after(existing);
+      return;
+    }
+
+    const host = document.createElement("span");
+    host.setAttribute(COMPANION_HOST_ATTRIBUTE, "");
+    const shadow = host.attachShadow({ mode: "open" });
+    shadow.innerHTML = `
+      <style>
+        :host {
+          display: inline-flex;
+          margin-inline-start: 6px;
+          vertical-align: baseline;
+        }
+        a {
+          border: 1px solid currentColor;
+          border-radius: 3px;
+          color: #0972d3;
+          font: 700 10px/14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          padding: 0 3px;
+          text-decoration: none;
+        }
+        a:hover, a:focus-visible {
+          background: #e9f3ff;
+          text-decoration: underline;
+        }
+        a[data-state="loading"], a[data-state="unconfigured"] {
+          color: #687078;
+        }
+        a[data-state="error"] {
+          color: #d13212;
+        }
+      </style>
+      <a data-state="loading" target="_blank" rel="noopener noreferrer" aria-label="SSO-enabled version of this link">SSO</a>
+    `;
+
+    const ssoLink = shadow.querySelector("a");
+    const destinationProvider = () => sourceLink.getAttribute("href");
+    const update = () => refreshSsoLink(ssoLink, destinationProvider);
+    sourceLink.addEventListener("pointerenter", update);
+    sourceLink.addEventListener("focus", update);
+    wireSsoLink(ssoLink, destinationProvider);
+
+    sourceLink.after(host);
+    decoratedLinks.set(sourceLink, host);
+  }
+
+  function decorateContentLinks() {
+    const contentRoots = [...document.querySelectorAll("main, [role='main']")];
+    const roots = contentRoots.length ? contentRoots : [document.body];
+    const links = new Set();
+    for (const root of roots) {
+      for (const link of root?.querySelectorAll("a[href]") || []) {
+        links.add(link);
+      }
+    }
+
+    for (const link of links) {
+      if (isContentConsoleLink(link)) createCompanionLink(link);
+    }
+  }
+
+  function enhanceConsolePage() {
     createSsoLink();
+    decorateContentLinks();
 
     let updateScheduled = false;
     const observer = new MutationObserver(() => {
-      if (document.getElementById(LINK_HOST_ID) || updateScheduled) return;
+      if (updateScheduled) return;
       updateScheduled = true;
       window.setTimeout(() => {
         updateScheduled = false;
         createSsoLink();
+        decorateContentLinks();
       }, 100);
     });
     observer.observe(document.documentElement, {
@@ -473,6 +610,7 @@
     buildSsoUrl,
     extractIdentity,
     extractPermissionSetName,
+    normalizeAwsConsoleDestination,
     normalizePortalUrl,
     normalizeAccountId,
   };
@@ -489,5 +627,5 @@
   }
 
   registerActions();
-  keepSsoLinkMounted();
+  enhanceConsolePage();
 })();
